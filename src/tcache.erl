@@ -75,7 +75,7 @@ find_update(X, K, D, {Id0,_}=W0, _T, S0) ->
   KD = lists:keysort(1, tset:restrict_domain(K, D)),
   case tdtree:lookup({X,KD}, S0#state.data) of
     [] ->
-      io:format("Inserting {~p,~p} = ~p~n", [X,KD,{calc,W0}]),
+      %% io:format("Inserting {~p,~p} = ~p~n", [X,KD,{calc,W0}]),
       Tr = tdtree:insert({X,KD,{calc,W0}}, S0#state.data),
       S2 = S0#state{data = Tr, ck = S0#state.ck + 1},
       {reply, {{calc,W0}, S2#state.ck},  S2};
@@ -101,19 +101,19 @@ add_update(X, K, D, W, _T, V1, S0) ->
     {calc, W} ->
       case V1 of
 	V1 when is_list(V1) ->
-	  io:format("Inserting {~p,~p} = {i,~p,[]}~n", [X,KD,V1]),
+	  %% io:format("Inserting {~p,~p} = {i,~p,[]}~n", [X,KD,V1]),
 	  Tr = tdtree:insert({X,KD,{i,V1,[]}}, S0#state.data);
 	V1 ->
-	  io:format("Inserting {~p,~p} = ~p~n", [X,KD,V1]),
+	  %% io:format("Inserting {~p,~p} = ~p~n", [X,KD,V1]),
 	  Tr = tdtree:insert({X,KD,V1}, S0#state.data)
       end,
       S1 = S0#state{data = Tr, ck = S0#state.ck + 1},
       {reply, {V1, S1#state.ck}, S1};
     {calc, _} = Thr ->
-      io:format("Wrong thread ~p~n", [Thr]),
+      %% io:format("Wrong thread ~p~n", [Thr]),
       {reply, hang, S0};
     Other ->
-      io:format("Other = ~p, W = ~p~nData1 = ~p~n", [Other, W, S0#state.data]),
+      %% io:format("Other = ~p, W = ~p~nData1 = ~p~n", [Other, W, S0#state.data]),
       {reply, hang, S0}
   end.
 

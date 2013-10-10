@@ -1,6 +1,7 @@
 %% See LICENSE for licensing information.
 %% -*- coding: utf-8 -*-
 -module(wheredim_tests).
+-export([e6/1]).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -77,11 +78,14 @@ e5() ->
   end".
 
 e6() ->
+  e6(2).
+
+e6(TOrd) when is_integer(TOrd) ->
   %% Parallel, one-dimensional (tournament) wheredim clause (introducing parallelism)
   "// Tournament in 1 dimension
   A
   where
-    dim t <- 2
+    dim t <-" ++ integer_to_list(TOrd) ++ "
     dim s <- 0
 
     // Compute A across space
