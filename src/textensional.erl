@@ -37,15 +37,10 @@
     TypeOut :: ext_type().
 eval_ext({ext_expr, E0, {DimTypesIn, TypeOut}, Gr}, Ks) when
     length(Ks) == Gr ->
-  KDs = lists:map(fun(K) -> tset:restrict_domain(K, dims(DimTypesIn)) end, Ks),
-  eval_ext_seq_simple(DimTypesIn, TypeOut, E0, KDs).
+  {Dims,_OrdTys} = lists:unzip(DimTypesIn),
+  KDs = [tset:restrict_domain(K, Dims) || K <- Ks],
+  eval_ext_cl(DimTypesIn, TypeOut, E0, KDs).
 
-
-%%------------------------------------------------------------------------------
-%% Internal
-%%------------------------------------------------------------------------------
-dims(DimTypesIn) ->
-  lists:map(fun({Dim,_OrdType}) -> Dim end, DimTypesIn).
 
 %%------------------------------------------------------------------------------
 %% @doc Evaluate extensional expression as if it were a normal expression.
@@ -84,12 +79,12 @@ eval_ext_tcore(_DimTypesIn, _TypeOut, E0, Ks) ->
 %% @private
 %%------------------------------------------------------------------------------
 eval_ext_seq_simple(_DimTypesIn, _TypeOut, E0, Ks) ->
-  lists:map(fun(K) -> eval_simple(E0, K) end, Ks).
+  [eval_simple(E0, K) || K <- Ks].
 
 eval_simple(Const, _K) when is_number(Const) orelse is_boolean(Const) ->
   Const;
 eval_simple({primop, Primop, Eis}, K) ->
-  Dis = lists:map(fun(Ei) -> eval_simple(Ei, K) end, Eis),
+  Dis = [eval_simple(Ei, K) || Ei <- Eis],
   F = tprimop:f(Primop),
   apply(F, Dis);
 eval_simple({'#', Dim}, K) ->
@@ -104,4 +99,40 @@ lookup_ordinate(Dim, K) ->
 %% @private
 %%------------------------------------------------------------------------------
 eval_ext_cl(DimTypesIn, TypeOut, E0, Ks) ->
-  cl_map:on_the_fly(gpu, ice2cl, DimTypesIn, TypeOut, E0, Ks).
+  ISpecs = [{uniq(Dim),Ty} || {Dim,Ty} <- DimTypesIn],
+  Exp = sanitize(E0),
+  Vectors = binarise(DimTypesIn, Ks),
+  cl_map:on_the_fly(gpu, ice2cl, ISpecs, TypeOut, Exp, Vectors).
+
+
+%%------------------------------------------------------------------------------
+%% Internal
+%%------------------------------------------------------------------------------
+uniq ({phi, Id}) ->
+  "phi"++ Id;
+uniq ({dim, {Pos,Ix}, Id}) ->
+  Hidden = lists:flatmap(fun integer_to_list/1, [Ix|Pos]),
+  "dim"++ Hidden ++ Id.
+
+sanitize (Const) when is_number(Const); is_boolean(Const) ->
+  Const;
+sanitize ({primop, Op, Eis}) ->
+  {primop, Op, [sanitize(Ei) || Ei <- Eis]};
+sanitize ({'#', Dim}) ->
+  {'#', sanitize(Dim)};
+sanitize (Dim = {phi, _Id}) ->
+  uniq(Dim);
+sanitize (Dim = {dim, _H, _Id}) ->
+  uniq(Dim).
+
+-define(binarise(Kind),
+  <<<<V:Kind>> || {Dim,V} <- lists:flatten(Ks), Dim == Id>>).
+binarise (DimTypesIn, Ks) ->
+  [begin
+    Vector = case Ty of
+      "uint" -> ?binarise(32/native-unsigned-integer);
+      "int"  -> ?binarise(32/native         -integer);
+      "float" -> ?binarise(32/native          -float)
+    end,
+    {uniq(Id), Vector}
+   end || {Id,Ty} <- DimTypesIn].
