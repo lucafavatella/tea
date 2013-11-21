@@ -16,7 +16,11 @@ local_dim_in_wheredim_clause_test_() ->
     %%
     %% Ref: Feb 2013 cache semantics paper, section 14.1
     %% "Assumptions", point 2, sub-point 1.
-    ?_test(recursive_wheredim())
+    ?_test(recursive_wheredim()),
+    %%
+    %% Ref: Nov 2013 semantics paper, section 2 page 5, 6
+    ?_test(recursive_wheredim_nov2013_p5()),
+    ?_test(recursive_wheredim_nov2013_p6_combined())
    ]}.
 
 
@@ -64,14 +68,20 @@ wheredim_returning_abs_varying_in_dim_defined_in_same_wheredim() ->
 recursive_wheredim() ->
   S = "FactOf3
       where
-        var FactOf3 = BadFact @ [d <- 3]
-        dim d <- 0
-        var BadFact =
-          (if #.n == 0 then 1 else #.n * (BadFact @ [d <- #.n - 1]) fi)
+        var FactOf3 = F @ [n <- 3]
+        dim n <- 0
+        var F =
+          if #.d == 0 then 1 else #.d * (F @ [n <- #.d - 1]) fi
           where
-            dim n <- #.d
+            dim d <- #.n
           end
       end",
+  {wheredim, {wherevar, _,
+              [{"FactOf3", _},
+               {"F", {wheredim, _,
+                      [{{dim,_,"d"}, {'#',{dim,_,"n"}}}]}}]},
+   [{{dim,_,"n"}, 0}]} = %% dim n is defined outside var F
+    t1(t0(s(S))),
   ?assertMatch(
      {6,_},
      %% Upstream TL returns 6 too, even if, based on the Nov 2013
@@ -82,6 +92,47 @@ recursive_wheredim() ->
      %% 14.1 "Assumptions" re static semantics, point 2, sub-point 1)
      %% is not relevant.
      eval(S)).
+
+recursive_wheredim_nov2013_p5() ->
+  %% Ref: Nov 2013 semantics paper, section 2 page 5
+  S = "fact.3
+      where
+        fun fact.n = F
+        where
+          var F =
+            if #.d == 0 then 1 else #.d * (F @ [d <- #.d - 1]) fi
+            where
+              dim d <- n
+            end
+        end
+      end",
+  {wherevar, _,
+   [{"fact", {b_abs, [], [{phi,"n"}],
+              {wherevar, "F",
+               [{"F", {wheredim, _,
+                       [{{dim,_,"d"}, {'?', {phi,"n"}}}]}}]}}}]} =
+    t1(t0(s(S))),
+  ?assertMatch({6,_}, eval(S)).
+
+recursive_wheredim_nov2013_p6_combined() ->
+  %% Ref: Nov 2013 semantics paper, section 2 page 6 (wherevar and wheredim clauses combined into one)
+  S = "fact.3
+      where
+        fun fact.n = F
+        where
+          dim d <- n
+          var F =
+            if #.d == 0 then 1 else #.d * (F @ [d <- #.d - 1]) fi
+        end
+      end",
+  {wherevar, _,
+   [{"fact", {b_abs, [], [{phi,"n"}],
+              {wheredim, {wherevar, "F",
+                          [{"F", _}]},
+               [{{dim,_,"d"}, {'?',{phi,"n"}}}]}
+             }}]} =
+    t1(t0(s(S))),
+  ?assertMatch({6,_}, eval(S)).
 
 
 %% Internals
@@ -101,6 +152,16 @@ tcache_stop(Pid) ->
     true ->
       tcache_stop(Pid)
   end.
+
+s(S) ->
+  {ok, T} = tea:string(S),
+  T.
+
+t0(T) ->
+  ttransform0:transform0(T).
+
+t1(T) ->
+  ttransform1:transform1(T).
 
 eval(S) when is_list(S) ->
   {ok, T} = tea:string(S),
