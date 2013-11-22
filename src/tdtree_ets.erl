@@ -49,7 +49,9 @@ insert_correct_tree(Lbl) ->
   ets:insert(Lbl, {{"A",[{{dim,t},2}]}, {calc,[0]}}),
   ets:insert(Lbl, {{"B",[]}, {i,[{dim,s}],[]}}),
   ets:insert(Lbl, {{"B",[{{dim,s},0}]}, 1}),
-  ets:insert(Lbl, {{"B",[{{dim,s},1}]}, 1}).
+  ets:insert(Lbl, {{"B",[{{dim,s},1}]}, 1}),
+  ets:insert(Lbl, {{"C",[]}, {i,[{dim,t},{dim,s}],[]}}),
+  ets:insert(Lbl, {{"C",[{{dim,t},0},{{dim,s},0}]}, 1}).
 
 test() ->
   Lbl = cache_test,
@@ -63,4 +65,10 @@ test() ->
   1 = lookup({"B",[{{dim,t},0},{{dim,s},0}]}, Tab),
   {calc,[0]} = lookup({"A",[{{dim,t},2}]}, Tab),
   2 = lookup({"A",[{{dim,t},1},{{dim,s},0}]}, Tab),
-  3 = lookup({"A",[{{dim,t},1},{{dim,s},1}]}, Tab).
+  3 = lookup({"A",[{{dim,t},1},{{dim,s},1}]}, Tab),
+  1 = lookup({"A",[{{dim,t},0},{{dim,s},0}]}, Tab),
+  [{dim,t},{dim,s}] = lookup({"C",[]}, Tab),
+  1 = lookup({"C",[{{dim,t},0},{{dim,s},0}]}, Tab), %% t,s
+  1 = lookup({"C",[{{dim,s},0},{{dim,t},0}]}, Tab), %% s,t (reversed). Shall the logic be in this module or tcache?
+  [{dim,s}] = lookup({"C",[{{dim,t},0}]}, Tab), %% t. Shall the logic be in this module or tcache?
+  [{dim,t}] = lookup({"C",[{{dim,s},0}]}, Tab). %% s. Shall the logic be in this module or tcache?
