@@ -16,7 +16,7 @@
 -record(state, { 
 	  ck    = 0,
 	  age   = 2,
-	  data  = tdtree:new(),
+	  data  = tdtree_ets:new(tcache),
 	  limit = undefined
 	 }).
 
@@ -73,18 +73,19 @@ handle_call(terminate, _From, S0) ->
 %%------------------------------------------------------------------------------
 find_update(X, K, D, {Id0,_}=W0, _T, S0) ->
   KD = lists:keysort(1, tset:restrict_domain(K, D)),
-  case tdtree:lookup({X,KD}, S0#state.data) of
+  %% io:format(user, "Looking up {~p,~p}~n", [X,KD]),
+  case tdtree_ets:lookup({X,KD}, S0#state.data) of
     [] ->
-      io:format("Inserting {~p,~p} = ~p~n", [X,KD,{calc,W0}]),
-      Tr = tdtree:insert({X,KD,{calc,W0}}, S0#state.data),
-      S2 = S0#state{data = Tr, ck = S0#state.ck + 1},
+      %% io:format(user, "Inserting {~p,~p} = ~p~n", [X,KD,{calc,W0}]),
+      true = tdtree_ets:insert({X,KD,{calc,W0}}, S0#state.data),
+      S2 = S0#state{ck = S0#state.ck + 1},
       {reply, {{calc,W0}, S2#state.ck},  S2};
     {calc, {Id1,_}=W1} = V ->
       case lists:prefix(Id1, Id0) of
 	true ->
 	  %% FIXME
 	  %% Threads can be <= to others which is wrong, but it works...
-	  %% io:format("Thread ~p is less than or equal to ~p~n", [W1, W0]),
+	  %% io:format(user, "Thread ~p is less than or equal to ~p~n", [W1, W0]),
 	  {reply, hang, S0};
 	false ->
 	  {reply, {V, S0#state.ck}, S0}
@@ -95,25 +96,26 @@ find_update(X, K, D, {Id0,_}=W0, _T, S0) ->
 
 add_update(X, K, D, W, _T, V1, S0) ->
   KD = lists:keysort(1, tset:restrict_domain(K, D)),
-  case tdtree:lookup({X,KD}, S0#state.data) of
+  %% io:format(user, "Looking up {~p,~p}~n", [X,KD]),
+  case tdtree_ets:lookup({X,KD}, S0#state.data) of
     [] ->
       {reply, hang, S0};
     {calc, W} ->
       case V1 of
 	V1 when is_list(V1) ->
-	  io:format("Inserting {~p,~p} = {i,~p,[]}~n", [X,KD,V1]),
-	  Tr = tdtree:insert({X,KD,{i,V1,[]}}, S0#state.data);
+	  io:format(user, "Inserting {~p,~p} = {i,~p,[]}~n", [X,KD,V1]),
+	  true = tdtree_ets:insert({X,KD,{i,V1,[]}}, S0#state.data);
 	V1 ->
-	  io:format("Inserting {~p,~p} = ~p~n", [X,KD,V1]),
-	  Tr = tdtree:insert({X,KD,V1}, S0#state.data)
+	  io:format(user, "Inserting {~p,~p} = ~p~n", [X,KD,V1]),
+	  true = tdtree_ets:insert({X,KD,V1}, S0#state.data)
       end,
-      S1 = S0#state{data = Tr, ck = S0#state.ck + 1},
+      S1 = S0#state{ck = S0#state.ck + 1},
       {reply, {V1, S1#state.ck}, S1};
     {calc, _} = Thr ->
-      io:format("Wrong thread ~p~n", [Thr]),
+      io:format(user, "Wrong thread ~p~n", [Thr]),
       {reply, hang, S0};
     Other ->
-      io:format("Other = ~p, W = ~p~nData1 = ~p~n", [Other, W, S0#state.data]),
+      io:format(user, "Other = ~p, W = ~p~nData1 = ~p~n", [Other, W, S0#state.data]),
       {reply, hang, S0}
   end.
 
