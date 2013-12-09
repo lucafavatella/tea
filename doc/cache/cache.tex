@@ -1,0 +1,162 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+
+\begin{document}
+ICE: Cache
+
+XXX: The text below was written before John Plaice answered some questions by Ed and Luca.
+
+
+# Introduction
+
+The description of the cache in the Feb 2013 paper can be read as multi-threaded but (1) it lacks possible optimizations for multiple threads accessing it, expecially re beta.ck, beta.age and number of nodes, and (2) beta.collect() is not fully specified for multi-threaded implementations.
+In the following, a concurrent version of the cache is described, that aims to be optimized and more clear for a multi-threaded implementation while being compatible with the intents of the authors in the Feb 2013 paper, therefore:
+* Synchronization points are clearly indicated in the description, where not trivial to identify, in order to allow the implementation to address the synchronization requirements by means of low level synchronization primitives;
+* beta.ck is unused and therefore removed.
+
+
+# Notes on the Feb 2013 paper
+
+[See doc/cache.md]
+
+
+# Description of the concurrent cache
+
+In the following, the concurrent cache state, cache instructions and cache-related semantics are described.
+A full description is given but parts equal to the Feb 2013 paper are identified as such and skipped.
+
+## Concurrent cache - Rules
+
+Rule (9 - eval) is:
+TODO
+
+Rule (10 - eval1) as per Feb 2013 cache.
+Rule (11 - eval2) as per Feb 2013 cache.
+
+## Concurrent cache - State
+
+A concurrent cache beta is a data structure with three variables:
+* beta.age is a per-processor natural number (including zero), initially 2, used for computing the global retirement age for the garbage collector;
+* beta.data contains the nodes of the cache and is a multi-tree, where each tree is the decision tree of a variable;
+* beta.limit - as per Feb 2013 paper.
+Note: beta.ck is not present.
+
+## Concurrent cache - Instructions
+
+TODO
+
+### beta.find()
+
+TODO
+
+### beta.add()
+
+TODO
+
+### beta.collect()
+
+TODO
+
+
+
+# Introduction to garbage collection in the concurrent cache
+
+XXX Re note 4 concurrent beta.collect() - Maybe best approach is not having only one thread at a time garbage collecting, but as many as needed until beta.age is zero (as gamma_j.age is minimum zero), each traversing multitree in same order as each GC increases gamma_j.age, as later thread with lower beta.age could succeed to GC finding higher gamma_j.age.
+
+XXX Re note 4 concurrent beta.collect() - Maybe there is a way for W2 to delegate to W1 its job as well (or -better- viceversa), but it would require some synchronization between threads during beta.collect().
+
+
+The sequentialXXX cache (1) does not guarantee that beta.limit is respected, (2) neither that the garbage collectable nodes created by rule (9) for a variable 'x' and not yet garbage collected do not sum up to the analogous nodes (let's name this type of nodes as 'GC-able-not-GC-ed nodes') created for variable 'y', therefore not guaranteeing an upper bound on the number of cache nodes considering only (a) beta.limit and (b) the maximum of the numbers of GC-able-not-GC-ed nodes created by the various expressions as at least both (a) beta.limit and (b_prime) the GC-able-not-GC-ed nodes of all variables must be considered in order to try to provide an upper bound on the number of cache nodes.
+The sequentialXXX cache tries to mitigate the number of GC-able-not-GC-ed nodes with a final (wrong) beta.find() XXX.
+
+
+
+
+
+
+Catering for multiple processors concurrently accessing the 
+
+The garbage collection strategy in presence of multiple processors accessing the cache affects scalability and memory usage, requiring compromises.
+
+
+
+The following contains diversions from the cache semantics as in paper Feb 2013:
+...
+* In beta.find(), a processor does not attempt 
+
+* beta.gc_ing is a boolean indicating whether any processor is already garbage collecting
+  * This variable could be kept per decision tree in order to allow for recursive help in GC (with additional beta.gc_helping and beta.gc_helping_who). That would map (more) closely a sequential implementation of the cache, i.e. each processor would try to garbage collect whenever adding a node, but (1) would complicate the cache and (2) would 
+* beta.gc_ing_who
+
+The following contains clarifications compared to the cache semantics as in paper Feb 2013:
+* beta.data does not only hold a decision tree for each variable, but it also holds the number of nodes in the tree
+  * The nodes that are the same type counted are the same counted in beta.limit (so all of them, i.e. value, calc value and missing dimensions)
+  * The number of nodes is not a simple counter but a sequence of counters (potentially negative), one per processor
+
+\section{State}
+A cache beta is a data structure with three variables:
+* beta.limit;
+* A sequence of beta.age, one per processor;
+* A multi-tree 'beta.data', where each tree is the decision tree of a variable.
+
+The multi-tree beta.data can be defined as a dynamic sequence of elements, one per variable, where each element is a tuple containing:
+* The variable identifier the element refers to, e.g. 'x';
+* A pointer to the actual decision tree for the variable;
+* The number of nodes in the tree (TODO maybe this could be substituted with a sequence of numbers, one per processor; a processor always increments/decrements its own counter; when a processor has to decide whether to garbage collect, it will check first if someone else is already in the process of deciding (synchronization point)).
+
+Each node gamma_j of each decision tree has an age gamma_j.age.
+
+\section{Actors}
+
+Processors
+
+
+
+\end{document}
+Handling of age and cache garbage collection
+
+Objectives:
+* Make sure that things are garbage collected
+* Make sure that we can split the age
+* Make sure that given N concurrent threads are doing find and adds that it works on a semantics level providing the b.data is atomic
+
+
+Subject: Age of the cache beta.age
+
+Hi Ed,
+
+As you proposed, it is fine to keep one beta.age per processor rather than a global one. I propose to do a small change in the semantics for this - details below.
+
+
+beta.age is incremented in beta.find() and decremented in beta.collect(). The curious thing is that in beta.find():
+* If gamma_j.age > beta.age -> beta.age = gamma_j.age + 1
+So, in particular, if gamma_j.age = beta.age, beta.age does not change.
+This small detail makes impossible reproducing the (exact) same semantics keeping a beta.age per processor, but I think it is reasonable changing the semantics. In order to ensure that the semantics works the same on a single processor or multiple processors, I propose to change it in this way:
+* If gamma_j.age > beta.age -> beta.age = gamma_j.age
+(basically beta.age is the maximum of the gamma_j.age values)
+so that beta.collect() can compute the maximum of these local beta.age.
+This change is consistent with the textual description in the cache paper:
+  "If, at any point, a node whose age is greater than the global retirement age is retrieved, the global retirement age is increased to _the age of the node_ before that node is set back to zero".
+
+For clarity, an alternative way would be:
+* If gamma_j.age >= beta.age -> beta.age = gamma_j.age + 1 (wrong)
+but it would not work the same on single and multiple processors.
+
+
+Doing this change in the semantics:
+
+In beta.find(), the beta.age of the local processor can be used.
+
+In beta.collect():
+* All copies of beta.age must be read. The global age is the maximum;
+* Either:
+  * The copies must be set to the same value (global age - 1); or
+  * All of them must be decremented by one;
+* The decremented global beta.age is used for GC.
+
+Cheers
+Luca
+
+
+P.S.
+Another change in the semantics we might consider is using in beta.collect() the global beta.age() _before_ the decrement instead of the decremented one. But I think it makes not sense doing this change in the semantics because in beta.find() the "+1" was not applied in all conditions anyway.
