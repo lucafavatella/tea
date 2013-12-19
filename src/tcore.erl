@@ -14,21 +14,22 @@ eval(Const, _I, _E, _K, _D, _W, T) when is_number(Const) orelse is_boolean(Const
 eval({string, Str}, _I, _E, _K, _D, _W, T) ->
   {{string, Str}, T};
 
-eval({char, Str}, _I, _E, _K, _D, _W, T) ->
-  {{char, Str}, T};
+eval({char, Char}, _I, _E, _K, _D, _W, T) ->
+  {{char, Char}, T};
 
 %%-------------------------------------------------------------------------------------
 %% Primop
 %%-------------------------------------------------------------------------------------
-eval({primop, F, Eis}, I, E, K, D, W, T) ->
+eval({primop, Primop, Eis}, I, E, K, D, W, T) ->
   {Dis, MaxT} = tpar:eval(Eis, I, E, K, D, W, T),
   case tset:union_d(Dis) of
     {true, Dims} ->
       {Dims, MaxT};
     {false, Dis1} ->
+      F = tprimop:f(Primop),
       {apply(F, Dis1), MaxT}
   end;
-      
+
 %%-------------------------------------------------------------------------------------
 %% Tuple Expressions
 %%-------------------------------------------------------------------------------------
@@ -84,63 +85,68 @@ eval({Q, E0}, I, E, K, D, W, T) when Q == '#' orelse Q == '?' ->
       {D0, T0};
     false ->
       case lists:member(D0, D) of
-	true ->
-          DimType =
-            case Q of
-              '#' -> dim;
-              '?' -> phi
-            end,
-          DimType = element(1, D0), %% Hardcoded expectation
-	  {lookup_ordinate(D0, K), T0};
-	false ->
-	  {[D0], T0}
+        true ->
+          case {Q, D0} of
+            {'?', {phi,_}} ->
+              ok;
+            {'#', {dim,_,_}} ->
+              ok;
+            {'#', _} ->
+              io:format("Querying (~p) context for dimension ~p~n", [Q, D0])
+          end,
+          {lookup_ordinate(D0, K), T0};
+        false ->
+          {[D0], T0}
       end
   end;
 
 %%------------------------------------------------------------------------------
 %% Base Abstraction
 %%------------------------------------------------------------------------------
-eval({b_abs, Is, _Params, _E0}=Abs, I, E, K, D, W, T) ->
-  eval_abs(Is, Abs, I, E, K, D, W, T);
+eval({b_abs, _Is, _Params, _E0}=Abs, I, E, K, D, W, T) ->
+  freeze_closure(tclosure:close_abs(Abs, I, E), I, E, K, D, W, T);
 
 eval({b_apply, E0, Eis}, I, E, K, D, W, T) ->
-  %% The evaluation of abs is serialized from the evaluation of actual
-  %% parameters for re-using the context perturbation '@' expression
-  {D0, T0} = eval(E0, I, E, K, D, W, T),
-  case tset:is_k(D0) of
-    true ->
-      {D0, T0};
-    false ->
-      {frozen_b_abs, AbsI, AbsE, FrozenK, AbsParams, AbsBody} = D0,
-      eval({'@', AbsBody, {t, lists:zip(AbsParams, Eis)}},
-           AbsI, AbsE, FrozenK, tset:domain(FrozenK), W, T0)
+  {D0is, MaxT} = tpar:eval([E0 | Eis], I, E, K, D, W, T),
+  case tset:union_d(D0is) of
+    {true, Dims} ->
+      {Dims, MaxT};
+    {false, D0is1} -> %% XXX Why Dis1 even if equal to Dis?
+      [D0 | Dis] = D0is1,
+      {frozen_closed_b_abs, ClI, ClE, FrozenK, AbsParams, AbsBody} = D0,
+      AbsParamsK = lists:zip(AbsParams, Dis),
+      FPK = tset:perturb(FrozenK, AbsParamsK),
+      eval(AbsBody, ClI, ClE,
+           FPK, tset:domain(FPK),
+           W, MaxT)
   end;
 
 %%------------------------------------------------------------------------------
 %% Value Abstraction
 %%------------------------------------------------------------------------------
-eval({v_abs, Is, _Params, _E0}=Abs, I, E, K, D, W, T) ->
-  eval_abs(Is, Abs, I, E, K, D, W, T);
+eval({v_abs, _Is, _Params, _E0}=Abs, I, E, K, D, W, T) ->
+  freeze_closure(tclosure:close_abs(Abs, I, E), I, E, K, D, W, T);
 
 eval({v_apply, E0, Eis}, I, E, K, D, W, T) ->
-  %% The evaluation of abs is serialized from the evaluation of actual
-  %% parameters for re-using the context perturbation '@' expression
-  {D0, T0} = eval(E0, I, E, K, D, W, T),
-  case tset:is_k(D0) of
-    true ->
-      {D0, T0};
-    false ->
-      {frozen_v_abs, AbsI, AbsE, FrozenK, AbsParams, AbsBody} = D0,
-      eval({'@', AbsBody, {t, lists:zip(AbsParams, Eis)}}, AbsI, AbsE,
-           tset:perturb(K, FrozenK), tset:union(D, tset:domain(FrozenK)),
-           W, T0)
+  {D0is, MaxT} = tpar:eval([E0 | Eis], I, E, K, D, W, T),
+  case tset:union_d(D0is) of
+    {true, Dims} ->
+      {Dims, MaxT};
+    {false, D0is1} -> %% XXX Why Dis1 even if equal to Dis?
+      [D0 | Dis] = D0is1,
+      {frozen_closed_v_abs, ClI, ClE, FrozenK, AbsParams, AbsBody} = D0,
+      AbsParamsK = lists:zip(AbsParams, Dis),
+      FPK = tset:perturb(FrozenK, AbsParamsK),
+      eval(AbsBody, ClI, ClE,
+           tset:perturb(K, FPK), tset:union(D, tset:domain(FPK)),
+           W, MaxT)
   end;
 
 %%------------------------------------------------------------------------------
 %% Intension Abstraction
 %%------------------------------------------------------------------------------
-eval({i_abs, Is, _E0}=Abs, I, E, K, D, W, T) ->
-  eval_abs(Is, Abs, I, E, K, D, W, T);
+eval({i_abs, _Is, _E0}=Abs, I, E, K, D, W, T) ->
+  freeze_closure(tclosure:close_abs(Abs, I, E), I, E, K, D, W, T);
 
 eval({i_apply, E0}, I, E, K, D, W, T) ->
   {D0, T0} = eval(E0, I, E, K, D, W, T),
@@ -148,17 +154,27 @@ eval({i_apply, E0}, I, E, K, D, W, T) ->
     true ->
       {D0, T0};
     false ->
-      {frozen_i_abs, AbsI, AbsE, FrozenK, AbsBody} = D0,
-      eval(AbsBody, AbsI, AbsE,
+      {frozen_closed_i_abs, ClI, ClE, FrozenK, AbsBody} = D0,
+      eval(AbsBody, ClI, ClE,
            tset:perturb(K, FrozenK), tset:union(D, tset:domain(FrozenK)),
            W, T0)
   end;
+
+%%------------------------------------------------------------------------------
+%% Closure of abstraction over enviroment
+%%------------------------------------------------------------------------------
+eval({closure, _ClI, _ClE, _Abs}=Cl, I, E, K, D, W, T) ->
+  freeze_closure(Cl, I, E, K, D, W, T);
 
 %%-------------------------------------------------------------------------------------
 %% Wherevar
 %%-------------------------------------------------------------------------------------
 eval({wherevar, E0, XiEis}, I, E, K, D, W, T) ->
-  eval(E0, I, tset:perturb(E, XiEis), K, D, W, T);
+  %% Close shallowest abstractions in new expressions in environment
+  %% if needed. Wherevar is the only expression changing the
+  %% environment, therefore the only one needing to do this.
+  XiClEis = tclosure:close_shallowest_abs_in_wherevar_expressions(XiEis, I, E),
+  eval(E0, I, tset:perturb(E, XiClEis), K, D, W, T);
 
 %%-------------------------------------------------------------------------------------
 %% Wheredim
@@ -184,13 +200,7 @@ eval({wheredim, E0, XiEis}, I, E, K, D, W, T) ->
   end;
 
 %%-------------------------------------------------------------------------------------
-%% Dimension Identifiers (public)
-%%-------------------------------------------------------------------------------------
-eval({dim,Xi}=Di, _I, _E, _K, _D, _W, T) when is_list(Xi) orelse is_atom(Xi) ->
-  {Di, T};
-
-%%-------------------------------------------------------------------------------------
-%% Dimension Identifiers (hidden) replacing local dimensions in wheredim clauses
+%% Dimension Identifiers replacing local dimensions in wheredim clauses
 %%-------------------------------------------------------------------------------------
 eval({dim,{_Pos,_Idx},Xi}=Di, _I, _E, _K, _D, _W, T) when is_list(Xi) orelse is_atom(Xi) ->
   {Di, T};
@@ -205,8 +215,28 @@ eval({phi,Xi}=Di, _I, _E, _K, _D, _W, T) when is_list(Xi) orelse is_atom(Xi) ->
 %% Variable Identifiers
 %%-------------------------------------------------------------------------------------
 eval(Xi, I, E, K, D, W, T) when is_list(Xi) orelse is_atom(Xi) ->
-  {_D0, _T0} = eval1(Xi, I, E, K, [], W, T),
-  tcache:find(Xi, K, D, W, T).
+  %% This rule differs from the one described in the Feb 2013 cache
+  %% semantics paper in order to avooid to return a calc value in case
+  %% of GC concurrent with the invocation of beta.find().
+  %%
+  %% XXX Can GC be concurrent in the first place? Answer via email by
+  %% John Plaice indicates that "the collect cannot be run
+  %% simultaneously".
+  %%
+  %% The rule as per Feb 2013 cache semantics paper has (or at least
+  %% Luca thinks it has) the aim of resetting to 0 the age of the
+  %% queried value (and upstream chain). The removal of the final call
+  %% to beta.find() nullifies such (alleged) aim.
+  %%
+  %% In order to restore such aim, a new instruction shall be designed
+  %% and implemented for the cache, beta.pseudo_find(), whose aim is
+  %% traversing the tree in search of the specified (x,k) and
+  %% resetting beta.age (whatever it is) and gamma_j.age in all the
+  %% chain until the position of the node is reached. If
+  %% beta.data(x,k) is not defined, *no calc<w> node shall be
+  %% created*. Probably, GC shall be triggered by this instruction
+  %% too.
+  {_D0, _T0} = eval1(Xi, I, E, tset:restrict_domain(K, D), [], W, T).
 
 %%-------------------------------------------------------------------------------------
 %% Finding identifiers in the cache
@@ -214,8 +244,13 @@ eval(Xi, I, E, K, D, W, T) when is_list(Xi) orelse is_atom(Xi) ->
 eval1(Xi, I, E, K, D, W, T) ->
   {D0, T0} = eval2(Xi, I, E, K, D, W, T),
   case tset:is_k(D0) andalso tset:subset(D0, tset:domain(K)) of
-    true -> 
-      eval1(Xi, I, E, K, tset:union(D, D0), W, T);
+    true ->
+      case tset:difference(D0, D) of
+        [] ->
+          {error, loop_detected, {already_known_dimensions, D0}};
+        _ ->
+          eval1(Xi, I, E, K, tset:union(D, D0), W, T)
+      end;
     false ->
       {D0, T0}
   end.
@@ -225,11 +260,11 @@ eval2(Xi, I, E, K, D, W, T) ->
   case D0 of
     {calc, W} ->
       case lists:keyfind(Xi, 1, E) of
-	{_, E0} ->
-	  {D1, T1} = eval(E0, I, E, K, D, W, T0),
-	  tcache:add(Xi, K, D, W, T1, D1);
-	false ->
-	  {error, undefined_identifier, Xi}
+        {_, E0} ->
+          {D1, T1} = eval(E0, I, E, K, D, W, T0),
+          tcache:add(Xi, K, D, W, T1, D1);
+        false ->
+          {error, undefined_identifier, Xi}
       end;
     {calc, _W1} ->
       eval2(Xi, I, E, K, D, W, T0 + 1);
@@ -267,8 +302,12 @@ even_elements([X|L], N, Acc) when N rem 2 =/= 0 ->
 even_elements([_|L], N, Acc) ->
   even_elements(L, N+1, Acc).
 
-
-eval_abs(Is, Abs, I, E, K, D, W, T) ->
+%%------------------------------------------------------------------------------
+%% @doc Freeze closure.
+%% @private
+%%------------------------------------------------------------------------------
+freeze_closure({closure, _ClI, _ClE, Abs}=Cl, I, E, K, D, W, T) ->
+  Is = frozen_expressions(Abs),
   {Dis, MaxT} = tpar:eval(Is, I, E, K, D, W, T),
   case tset:union_d(Dis) of
     {true, Dims} ->
@@ -278,15 +317,19 @@ eval_abs(Is, Abs, I, E, K, D, W, T) ->
         [] ->
           KD = tset:restrict_domain(K, D),
           FrozenK = tset:restrict_domain(KD, Dis1),
-          {freeze_abs(I, E, FrozenK, Abs), MaxT};
+          {freeze_closure_in_k(Cl, FrozenK), MaxT};
         Dims2 -> %% Missing frozen dims
           {Dims2, MaxT}
       end
   end.
 
-freeze_abs(I, E, FrozenK, {i_abs, _Is, E0}) ->
-  {frozen_i_abs, I, E, FrozenK, E0};
-freeze_abs(I, E, FrozenK, {b_abs, _Is, Params, E0}) ->
-  {frozen_b_abs, I, E, FrozenK, Params, E0};
-freeze_abs(I, E, FrozenK, {v_abs, _Is, Params, E0}) ->
-  {frozen_v_abs, I, E, FrozenK, Params, E0}.
+frozen_expressions({b_abs, Is, _Params, _E0}) -> Is;
+frozen_expressions({v_abs, Is, _Params, _E0}) -> Is;
+frozen_expressions({i_abs, Is,          _E0}) -> Is.
+
+freeze_closure_in_k({closure, ClI, ClE, {b_abs, _Is, Params, E0}}, FrozenK) ->
+  {frozen_closed_b_abs, ClI, ClE, FrozenK, Params, E0};
+freeze_closure_in_k({closure, ClI, ClE, {v_abs, _Is, Params, E0}}, FrozenK) ->
+  {frozen_closed_v_abs, ClI, ClE, FrozenK, Params, E0};
+freeze_closure_in_k({closure, ClI, ClE, {i_abs, _Is,         E0}}, FrozenK) ->
+  {frozen_closed_i_abs, ClI, ClE, FrozenK,         E0}.

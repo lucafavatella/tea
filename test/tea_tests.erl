@@ -2,119 +2,80 @@
 %% -*- coding: utf-8 -*-
 -module(tea_tests).
 
-%% tea_tests: tests for the interpreter.
+%% Simple positive tests without interaction with the cache.
 
 -include_lib("eunit/include/eunit.hrl").
 
 
 %% API tests.
 
-const_test_ () ->
-    %% replace with qc generators
-    MaxN = 100000000000000000000,
-    [begin
-        N = random:uniform(MaxN),
-        {ok, Tree} = tea:string(integer_to_list(N)),
-        ?_assertMatch({N, _},
-            tcore:eval(Tree, fun(X)->X end,[],[], [], {[],self()}, 0))
-    end || _ <- lists:seq(1,10)].
+const_test_() ->
+  %% replace with qc generators
+  MaxN = 100000000000000000000,
+  [begin
+     N = random:uniform(MaxN),
+     ?_assertMatch({N, _}, eval(integer_to_list(N)))
+   end || _ <- lists:seq(1,10)].
 
-bool_test_ () ->
-    {ok, Tree} = tea:string(" false "),
-    fun () ->
-        ?assertMatch({false, _},
-            tcore:eval(Tree, fun(X)->X end,[],[], [], {[],self()}, 0))
-    end.
+bool_test_() ->
+  [
+   ?_assertMatch({false, _}, eval("false")),
+   ?_assertMatch({true,  _}, eval("true "))
+  ].
 
-string_test_ () ->
-    {ok, Tree} = tea:string("`Test`"),
-    S = {string,"Test"},
-    fun () ->
-        ?assertMatch({S, _},
-            tcore:eval(Tree, fun(X)->X end,[],[], [], {[],self()}, 0))
-    end.
+string_test_() ->
+  [
+   ?_assertMatch({{string,"Test"}, _}, eval("\"Test\"")),
+   ?_assertMatch({{string,"Test"}, _}, eval("`Test`"))
+  ].
 
-constant_dim_test_ () ->
-    {ok, Tree} = tea:string("#.t"),
-    K = [{{dim,"t"}, 100}],
-    D = [{dim,"t"}],
-    fun () ->
-        ?assertMatch({100, _},
-            tcore:eval(Tree, [],[],K, D, {[],self()}, 0))
-    end.
+char_test() ->
+  ?assertMatch({{char,$.}, _}, eval("'.'")).
 
-tuple1_test_ () ->
-    {ok, Tree} = tea:string(" [t <- 1, s <- 2] "),
-    TimeD = {dim,"t"},
-    SpaceD = {dim,"s"},
-    K = [{TimeD,100}, {SpaceD,100}],
-    D = [TimeD,SpaceD],
-    fun () ->
-        ?assertMatch({{te,[{TimeD,1},{SpaceD,2}]}, _},
-            tcore:eval(Tree, [],[],K, D, {[],self()}, 0))
-    end.
+elsif_test_() ->
+  [
+   ?_assertMatch({2, _}, eval("if 1 == 0 then 1
+                            elsif 1 == 1 then 2 else 3 fi")),
+   ?_assertMatch({3, _}, eval("if 1 == 0 then 1
+                            elsif 0 == 1 then 2
+                            elsif 1 == 1 then 3 else 4 fi"))
+  ].
 
-primop1_test_ () ->
-    {ok, Tree} = tea:string(" 10 + 20 "),
-    fun () ->
-        ?assertMatch({30, _},
-            tcore:eval(Tree, fun(X)->X end,[],[], [], {[],self()}, 0))
-    end.
+context_query_test() ->
+  ?assertMatch({46, _}, eval("#.t where dim t <- 46 end")).
 
-primop2_test_ () ->
-    {ok, Tree} = tea:string(" #.t + #.s "),
-    TimeD = {dim,"t"},
-    SpaceD = {dim,"s"},
-    K = [{TimeD,100}, {SpaceD,100}],
-    fun () ->
-        ?assertMatch({[SpaceD,TimeD], _},
-            tcore:eval(Tree, [],[],K, [], {[],self()}, 0))
-    end.
+tuple_test() ->
+  ?assertMatch(
+     {{te, [{{dim,_,"t"},1}, {{dim,_,"s"},2}]}, _},
+     eval("[t <- 1, s <- 2] where dim t <- 0;; dim s <- 0 end")).
 
-primop3_test_ () ->
-    {ok, Tree} = tea:string(" #.t + #.s "),
-    TimeD = {dim,"t"},
-    SpaceD = {dim,"s"},
-    K = [{TimeD,100}, {SpaceD,100}],
-    D = [SpaceD, TimeD],
-    fun () ->
-        ?assertMatch({200, _},
-            tcore:eval(Tree, [],[],K, D, {[],self()}, 0))
-    end.
+perturb_test_() ->
+  [
+   ?_assertMatch(
+      {0, _},
+      eval("#.s @ [s <- 0] where dim t <- 100;; dim s <- 100 end")),
+   ?_assertMatch(
+      {100, _},
+      eval("#.t @ [s <- 0] where dim t <- 100;; dim s <- 100 end")),
+   ?_assertMatch(
+      {1, _},
+      eval("#.t @ [s <- 0, t <- 1] where dim t <- 100;; dim s <- 100 end")),
+   ?_assertMatch(
+      {1, _},
+      eval("#.t @ [t <- 1, s <- 0] where dim t <- 100;; dim s <- 100 end"))
+  ].
 
-perturb_test_ () ->
-    TimeD = {dim,"t"},
-    SpaceD = {dim,"s"},
-    K = [{TimeD,100}, {SpaceD,100}],
-    {ok, E1} = tea:string(" #.s @ [s <- 0] "),
-    {ok, E2} = tea:string(" #.t @ [s <- 0] "),
-    {ok, E3} = tea:string(" #.t @ [s <- 0, t <- 1] "),
-    {ok, E4} = tea:string(" #.t @ [t <- 1, s <- 0] "),
-    fun () ->
-        ?assertMatch({0, _},
-            tcore:eval(E1, [],[],K, [SpaceD], {[],self()}, 0)),
-        ?assertMatch({[TimeD], _},
-            tcore:eval(E2, [],[],[], [], {[],self()}, 0)),
-        ?assertMatch({1, _},
-            tcore:eval(E3, [],[],K, [TimeD], {[],self()}, 0)),
-        ?assertMatch({1, _},
-            tcore:eval(E4, [],[],K, [TimeD], {[],self()}, 0))
-    end.
+primop_test_() ->
+  [
+   ?_assertMatch({30, _}, eval("10 + 20")),
+   ?_assertMatch({5, _}, eval("#.t + #.s where dim t <- 2;; dim s <- 3 end"))
+  ].
 
-
-elsif_test_ () ->
-    {ok, E1} = tea:string(" if 1 == 0 then 1
-                         elsif 1 == 1 then 2 else 3 fi "),
-    {ok, E2} = tea:string(" if 1 == 0 then 1
-                         elsif 0 == 1 then 2
-                         elsif 1 == 1 then 3 else 4 fi "),
-    fun () ->
-        ?assertMatch({2,_},
-            tcore:eval(E1, [],[],[], [], {[],self()}, 0)),
-        ?assertMatch({3, _},
-            tcore:eval(E2, [],[],[], [], {[],self()}, 0))
-    end.
 
 %% Internals
+
+eval(S) when is_list(S) ->
+  {ok, T} = tea:string(S),
+  tea:eval(T).
 
 %% End of Module.
