@@ -103,19 +103,19 @@ add_update(X, K, D, W, _T, V1, S0) ->
     {calc, W} ->
       case V1 of
 	V1 when is_list(V1) ->
-	  io:format(user, "Inserting {~p,~p} = {i,~p,[]}~n", [X,KD,V1]),
+	  io:format("Inserting {~p,~p} = {i,~p,[]}~n", [X,KD,V1]),
 	  true = tdtree_ets:insert({X,KD,{i,V1,[]}}, S0#state.data);
 	V1 ->
-	  io:format(user, "Inserting {~p,~p} = ~p~n", [X,KD,V1]),
+	  io:format("Inserting {~p,~p} = ~p~n", [X,KD,V1]),
 	  true = tdtree_ets:insert({X,KD,V1}, S0#state.data)
       end,
       S1 = S0#state{ck = S0#state.ck + 1},
       {reply, {V1, S1#state.ck}, S1};
     {calc, _} = Thr ->
-      io:format(user, "Wrong thread ~p~n", [Thr]),
+      io:format("Wrong thread ~p~n", [Thr]),
       {reply, hang, S0};
     Other ->
-      io:format(user, "Other = ~p, W = ~p~nData1 = ~p~n", [Other, W, S0#state.data]),
+      io:format("Other = ~p, W = ~p~nData1 = ~p~n", [Other, W, S0#state.data]),
       {reply, hang, S0}
   end.
 
