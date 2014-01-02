@@ -243,8 +243,7 @@ eval(Xi, I, E, K, D, W, T) when is_list(Xi) orelse is_atom(Xi) ->
   %% beta.data(x,k) is not defined, *no calc<w> node shall be
   %% created*. Probably, GC shall be triggered by this instruction
   %% too.
-  {_D0, _T0} = eval1(Xi, I, E, K, [], W, T),
-  ice_cache:find(Xi, K, D, W, T).
+  {_D0, _T0} = eval1(Xi, I, E, ice_sets:restrict_domain(K, D), [], W, T).
 
 %%-------------------------------------------------------------------------------------
 %% Finding identifiers in the cache
